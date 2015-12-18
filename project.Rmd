@@ -1,0 +1,136 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Raphael Cóbe"
+date: "18 de dezembro de 2015"
+output: 
+  html_document: 
+    keep_md: yes
+    toc: yes
+---
+
+# Executive Summary
+The goal of this project is to predict the manner in which they did the exercise. The dataset used was the one from “Weight Lifting Exercise Dataset” from PUC-Rio. The goal was to, accurately predict the "classe" variable in the training set.
+
+# Prerequisites
+Bellow one will find the import section of the libraries used to develop the project:
+```{r message=FALSE}
+library(doMC)
+registerDoMC(cores = 4)
+library(caret)
+library(gbm)
+library(rpart)
+library(randomForest)
+set.seed(999)
+```
+
+
+# Getting and Cleaning Data
+
+First we need to load both the training and the test dataset. Then we divide the training dataset into a training partition (75% of the data - in sample) and a test partition (25% of the date - out-of-sample) in order to test our model with a larger number of case to predict.
+
+```{r}
+dataset.training <- read.csv("pml-training.csv")
+dataset.test <- read.csv("pml-testing.csv")
+training_partition <- createDataPartition(y=dataset.training$classe, p=0.75, list=FALSE)
+training <- dataset.training[training_partition,]
+test <- dataset.training[-training_partition,]
+```
+
+After that we noticed that the dataset contained a large number of variables with several NA values on them. Then we went through a process of feature selection, discarding the variables that wouldn't help building the model as explained on the next session.
+
+# Selecting Features
+
+First we had to remove the variables remove X, user_name, *_timestamp, *_window since they are qualitative variables and wouldn't help much in building a model. These variables are stored in columns 1 to 7.
+
+```{r}
+training <- training[,8:160]
+```
+
+Then we've had to remove the ones with **Near Zero Covariance** and also remove the columns that contains NAs values:
+
+```{r}
+nzv <- nearZeroVar(training, saveMetrics=TRUE)
+training <- training[,!nzv[,4]]
+training <- training[, colSums(is.na(training)) == 0]
+```
+
+After that we produced a clean dataset containing 53 variables.
+
+Our approach consisted basically to test a few methods for building models and using them to predict the outcome of our test partition.
+The first one to be used was the Decision Trees.
+
+# Predicting with Decision Trees
+
+We used the caret package to train our decision tree model:
+```{r}
+model <- train(classe ~ ., data=training, method="rpart")
+```
+
+We verify our model with our own training data partition.
+```{r}
+pred <- predict(model, training)
+confusionMatrix(pred, training$classe)
+```
+
+With that we've discovered the the accuracy of our model was only of 49%, wich is a very low value. Then, we decided to use a different model generation strategy. We tryed then the General Boosting Method
+
+
+# Predicting with Boosting
+
+In order to perform this experiment we've also used the caret package.
+```{r}
+model <- train(classe ~ ., data=training, method="gbm")
+```
+
+The results, trying to predict the outcome of our training partition (in-sample) were of 97.3% accuracy, which suggests a good model.
+
+```{r}
+pred <- predict(model, training)
+confusionMatrix(pred, training$classe)
+```
+
+After that we felt confortable to evaluate our model by trying to predict the classe variable at our test partition (Out-of-sample):
+```{r}
+pred_test <- predict(model, test)
+confusionMatrix(pred_test, test$classe)
+```
+
+The results suggest an accuracy of roughly 96%.
+
+We were curious to try and use a different model building technique in order to check if we could enhance further our accuracy.
+
+# Predicting with Random Forests
+
+After experimenting with the general boosting we tried to use the Random Forest approach.
+
+As the number of interactions for the default train function is quite high, we imposed a few constraints to our model training approach by feeding the train function with a TrainControl strategy. In that strategy we used a 8-fold cross valisation strategy. The number 8 was aligned with the number of cpus on the machine performing the experiment.
+
+```{r}
+model <- train(classe ~ ., data=training, method="rf", 
+               trControl=trainControl(method="cv", number=8))
+```
+
+Using this approach we were able to achieve a prediction accuracy (using the train partition - in sample) of 100%, which indicates that this model can predict the classe variable in all cases.
+```{r}
+pred <- predict(model, training)
+confusionMatrix(pred, training$classe)
+```
+
+We then tried to predict the classe variable of our test data partition (out-of-sample) and the achieved accuracy was of 99%. 
+```{r}
+pred_test <- predict(model, test)
+confusionMatrix(pred_test, test$classe)
+```
+
+After that we felt confident in using the test dataset provided.
+# Predicting the testing dataset
+
+```{r}
+final <- read.csv("pml-testing.csv")
+answers <- as.character(predict(model, final))
+answers
+```
+
+# Conclusion
+
+We were able to build a model capable of predicting correctly 100% of our in-sample data and roughly 99% of our out-of-sample data with a 95%-confidence interval of (0.992, 0.9964). That could only be achieved by using the parallel capabilities of the caret package which speeded-up the process of training the models. Also the values of Specificity values were higher than 0.99 for all prediction classes and the Sesitivity measures were also high for all classes (0.98 and higher).
